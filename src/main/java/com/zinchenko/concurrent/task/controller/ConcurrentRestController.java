@@ -5,7 +5,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.context.request.async.DeferredResult;
 
-import java.util.Date;
+import javax.servlet.http.HttpServletResponse;
 import java.util.concurrent.*;
 
 @RestController
@@ -14,38 +14,44 @@ public class ConcurrentRestController {
     @Autowired
     NashornProcessor nashornProcessor;
 
-    @RequestMapping(value = "/addScript", method = RequestMethod.POST, produces = "text/plain")
-    public DeferredResult<String> addEvalScript(@RequestBody String bodyScript){
-        System.out.println(new Date(System.currentTimeMillis())+"--start servlet-method--");
+    @RequestMapping(value = "/eval", method = RequestMethod.POST, produces = "text/plain")
+    public DeferredResult<String> addEvalScript(@RequestBody String bodyScript,  HttpServletResponse response){
 
         DeferredResult<String> deferredResult = new DeferredResult<>();
         CompletableFuture.supplyAsync(( ) -> nashornProcessor.addEvalScript(bodyScript))
                 .whenCompleteAsync((result, throwable) -> deferredResult.setResult(result));
 
-        System.out.println(new Date(System.currentTimeMillis())+"--return servlet-method--");
+        deferredResult.onTimeout(()->{
+            String message= nashornProcessor.interruptEngine();
+            response.setStatus(500);
+            deferredResult.setResult("Timeout Error.\n"+ message);
+        });
         return deferredResult;
     }
 
     @RequestMapping(value = "/invoke/{func_name}", method = RequestMethod.POST, produces = "text/plain")
-    public DeferredResult<String> invokeFunction(@PathVariable String func_name){
+    public DeferredResult<String> invokeFunction(@PathVariable String func_name, HttpServletResponse response){
 
         DeferredResult<String> deferredResult = new DeferredResult<>();
-        CompletableFuture.supplyAsync(( ) -> nashornProcessor.invokeFunction(func_name))
+                CompletableFuture.supplyAsync(( ) -> nashornProcessor.invokeFunction(func_name))
                 .whenCompleteAsync((result, throwable) -> deferredResult.setResult(result));
 
+        deferredResult.onTimeout(()->{
+           String message= nashornProcessor.interruptEngine();
+            response.setStatus(500);
+            deferredResult.setResult("Timeout Error.\n"+ message);
+        });
         return deferredResult;
     }
 
     @RequestMapping(value = "/getBindings", method = RequestMethod.POST, produces = "text/plain")
-    public DeferredResult<String> getBindingsl(){
-        DeferredResult<String> deferredResult = new DeferredResult<>();
-        CompletableFuture.supplyAsync(nashornProcessor::getBindings)
-                .whenCompleteAsync((result, throwable) -> deferredResult.setResult(result));
-        return deferredResult;
+    public String getBindings(){
+        return nashornProcessor.getBindings();
     }
 
     @RequestMapping(value = "/killTask", method = RequestMethod.POST, produces = "text/plain")
-    public String killTask(){
+    public String killTask(HttpServletResponse response){
+        response.setStatus(500);
         return nashornProcessor.interruptEngine();
     }
 

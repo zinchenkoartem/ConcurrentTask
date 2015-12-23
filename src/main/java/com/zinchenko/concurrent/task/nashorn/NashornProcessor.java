@@ -1,117 +1,109 @@
 package com.zinchenko.concurrent.task.nashorn;
 
+import org.apache.log4j.Logger;
 import org.springframework.stereotype.Component;
-
 import javax.script.*;
+import java.io.StringWriter;
 import java.util.concurrent.*;
+import java.util.concurrent.locks.ReentrantLock;
 
 
 @Component
-public class NashornProcessor {
-    private ScriptEngine engine;
+final public class NashornProcessor {
+
+    final private ScriptEngine engine;
     private Thread currThread;
-    private Semaphore semaphore;
-    private boolean status;
+//    private Semaphore semaphore;
+    final private ReentrantLock lock;
+    private StringWriter stringWriter=null;
+//    private boolean status;
+    private static final Logger logger = Logger.getLogger(NashornProcessor.class);
 
     public NashornProcessor(){
-        semaphore = new Semaphore(1);
+//        semaphore = new Semaphore(1);
+        lock=new ReentrantLock();
         engine = new ScriptEngineManager().getEngineByName("nashorn");
     }
 
     public String addEvalScript(String bodyScript){
-        System.out.println("----------------Enter to eval method - "+Thread.currentThread().getName()+"----------------");
+        logger.info("Enter to eval method - " + Thread.currentThread().getName());
         try {
-            if (semaphore.tryAcquire(10, TimeUnit.SECONDS)) {
+            if (lock.tryLock(5, TimeUnit.SECONDS)) {
+                logger.info("Enter to lock - " + Thread.currentThread().getName());
                 currThread = Thread.currentThread();
-                System.out.println("Enter to semaphore - "+Thread.currentThread().getName());
+                stringWriter = new StringWriter();
+                engine.getContext().setWriter(stringWriter);
                     try {
-                            status=true;
-                            sleep(1000);
-//                            ------------------
-                             engine.eval(bodyScript);
-//                            ------------------
-                            status=false;
+                        engine.eval(bodyScript);
                     }catch (ScriptException e) {
-                        e.printStackTrace();
-                        status=false;
-                        return e.getMessage();
+                        logger.info(e.getMessage());
+                        return "ScriptException "+e.getMessage();
                     }
             }else {
                 return "Engine is busy";
             }
         }catch (InterruptedException e) {
-            e.printStackTrace();
+            logger.error(e.getMessage());
             return "Waiting thread was interrupted";
         }finally {
-            if (!status) {
-                System.out.println("Exit from semaphore -  " + Thread.currentThread().getName());
-                semaphore.release();
+            if (currThread.isAlive()) {
+                logger.info("Exit from lock -  " + Thread.currentThread().getName());
+                lock.unlock();
             }
         }
-        System.out.println("----------------Exit from eval method - "+Thread.currentThread().getName()+"----------------");
-        System.out.println();
-        return "Script  added to Context";
+        logger.info("Exit from eval method - " + Thread.currentThread().getName());
+        return "Script  evaluated\nOutput: " +stringWriter.toString();
     }
 
     public String invokeFunction(String func_name){
-        System.out.println("----------------Enter to invoke method - "+Thread.currentThread().getName()+"----------------");
+        logger.info("Enter to invoke method - "+func_name+"     " + Thread.currentThread().getName() );
+        Object result;
+        Invocable invocable;
         try {
-            if (semaphore.tryAcquire(10, TimeUnit.SECONDS)) {
+            if (lock.tryLock(5, TimeUnit.SECONDS)) {
+                logger.info("Enter to lock - " +func_name+"     " + Thread.currentThread().getName());
                 currThread = Thread.currentThread();
-                System.out.println("Enter to semaphore - "+Thread.currentThread().getName());
-                Object result;
-                Invocable invocable;
+                stringWriter = new StringWriter();
+                engine.getContext().setWriter(stringWriter);
                 if (engine instanceof Invocable) {
                     invocable = (Invocable) engine;
                     try {
                         if (engine.getBindings(100).get(func_name) != null) {
-                            status=true;
-                            sleep(3000);
-//                            ------------------
                                 result = invocable.invokeFunction(func_name);
-//                            ------------------
-                            status=false;
-                            System.out.println("----------------Exit from invoke method - "+Thread.currentThread().getName()+"----------------");
-                            System.out.println();
-                            return result.toString();
+                            logger.info("Exit from invoke method - "+func_name+"     " + Thread.currentThread().getName() );
+                            return "Output: "+stringWriter.toString()+"\nResult is: "+result.toString();
                             }
                         }catch (ScriptException | NoSuchMethodException e) {
-                            e.printStackTrace();
-                            status=false;
+                            logger.error(e.getMessage());
+                            lock.unlock();
                             return e.getMessage();
                         }
                     }
-                }else {
-                     return "Engine is busy";
-                }
+                }else {return "Engine is busy";}
             }catch (InterruptedException e) {
-                e.printStackTrace();
+            logger.error(e.getMessage());
                 return "Waiting thread was interrupted";
             }finally {
-            if (!status) {
-                System.out.println("Exit from semaphore  -  " + Thread.currentThread().getName());
-                semaphore.release();
+            if (currThread.isAlive()) {
+                logger.info("Exit from lock  -  " +func_name+"     " + Thread.currentThread().getName());
+                lock.unlock();
                 }
             }
         return  "Function "+func_name+" is absent";
     }
 
     public String interruptEngine(){
-//        Not work
-//        if (status) {
-//            currThread.interrupt();
-//            future.cancel(true);
-//            pool.shutdown();
-//            semaphore.release();
-//            status=false;
-//            return "Thread was interrupted";
-//        }
-//        return "Nothing to interrupt. Engine ready to use";
-        return "Not work";
+
+        if (currThread.isAlive()) {
+            currThread.stop();
+            return "Thread was stoped. \nOutput: \n"+stringWriter.toString();
+        }
+        return "Nothing to interrupt. Engine ready to use";
+
     }
 
     public String getStatus(){
-       if( semaphore.availablePermits()==0){
+       if(currThread.isAlive()){
            return  "Nashorn is working.";
        }else {
             return "Nashorn is ready to use.";
@@ -122,14 +114,4 @@ public class NashornProcessor {
         return engine.getBindings(100).entrySet().toString();
     }
 
-    private String sleep(int millis){
-        try {
-            Thread.sleep(millis);
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-            System.out.println("---interrupt curr sleep thread: "+Thread.currentThread().getName());
-            return e.getMessage();
-        }
-        return "Ok";
-    }
 }

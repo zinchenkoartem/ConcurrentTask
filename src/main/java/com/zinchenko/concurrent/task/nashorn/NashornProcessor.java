@@ -12,15 +12,12 @@ import java.util.concurrent.locks.ReentrantLock;
 final public class NashornProcessor {
 
     final private ScriptEngine engine;
-    private Thread currThread;
-//    private Semaphore semaphore;
+    private  Thread currThread;
     final private ReentrantLock lock;
     private StringWriter stringWriter=null;
-//    private boolean status;
     private static final Logger logger = Logger.getLogger(NashornProcessor.class);
 
     public NashornProcessor(){
-//        semaphore = new Semaphore(1);
         lock=new ReentrantLock();
         engine = new ScriptEngineManager().getEngineByName("nashorn");
     }
@@ -33,26 +30,26 @@ final public class NashornProcessor {
                 currThread = Thread.currentThread();
                 stringWriter = new StringWriter();
                 engine.getContext().setWriter(stringWriter);
-                    try {
-                        engine.eval(bodyScript);
-                    }catch (ScriptException e) {
-                        logger.info(e.getMessage());
-                        return "ScriptException "+e.getMessage();
-                    }
+                try {
+                    engine.eval(bodyScript);
+                }catch (ScriptException e) {
+                    logger.info(e.getMessage());
+                    return "ScriptException "+e.getMessage();
+                }
             }else {
-                return "Engine is busy" ;
+                return "503" ;
             }
         }catch (InterruptedException e) {
             logger.error(e.getMessage());
             return "Waiting thread was interrupted";
         }finally {
-            if (currThread.isAlive()) {
+            if (currThread.isAlive() && lock.isHeldByCurrentThread()) {
                 logger.info("Exit from lock -  " + Thread.currentThread().getName());
                 lock.unlock();
             }
         }
         logger.info("Exit from eval method - " + Thread.currentThread().getName());
-        return "Script  evaluated\nOutput: " +stringWriter.toString();
+        return "Script  evaluated\nOutput:\n" +stringWriter.toString();
     }
 
     public String invokeFunction(String func_name){
@@ -69,29 +66,30 @@ final public class NashornProcessor {
                     invocable = (Invocable) engine;
                     try {
                         if (engine.getBindings(100).get(func_name) != null) {
-                                result = invocable.invokeFunction(func_name);
+                            result = invocable.invokeFunction(func_name);
                             logger.info("Exit from invoke method - "+func_name+"     " + Thread.currentThread().getName() );
-                            return "Output: "+stringWriter.toString()+"\nResult is: "+result.toString();
-                            }
-                        }catch (ScriptException | NoSuchMethodException e) {
-                            logger.error(e.getMessage());
-                            lock.unlock();
-                            return e.getMessage();
+                            return "Output:\n"+stringWriter.toString()+"\nResult is:\n"+result.toString();
                         }
+                    }catch (ScriptException | NoSuchMethodException e) {
+                        logger.error(e.getMessage());
+                        lock.unlock();
+                        return e.getMessage();
                     }
-                }else {return "Engine is busy";}
-            }catch (InterruptedException e) {
+                }
+            }else {return "503";}
+        }catch (InterruptedException e) {
             logger.error(e.getMessage());
-                return "Waiting thread was interrupted";
-            }finally {
-            if (currThread.isAlive()) {
+            return "Waiting thread was interrupted";
+        }finally {
+            if (currThread.isAlive() && lock.isHeldByCurrentThread()) {
                 logger.info("Exit from lock  -  " +func_name+"     " + Thread.currentThread().getName());
                 lock.unlock();
-                }
             }
+        }
         return  "Function "+func_name+" is absent";
     }
 
+    @SuppressWarnings("deprecation")
     public String interruptEngine(){
 
         if (currThread.isAlive()) {
@@ -103,9 +101,9 @@ final public class NashornProcessor {
     }
 
     public String getStatus(){
-       if(currThread.isAlive()){
-           return  "Nashorn is working.";
-       }else {
+        if(currThread.isAlive()){
+            return  "Nashorn is working.";
+        }else {
             return "Nashorn is ready to use.";
         }
     }
